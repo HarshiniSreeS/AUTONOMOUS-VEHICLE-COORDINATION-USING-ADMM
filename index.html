@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AV Coordination Simulation — ADMM-Based V2V</title>
+    <meta name="description" content="Real-time autonomous vehicle coordination simulation using ADMM optimization with NGSIM trajectory data. Visualizes V2V communication, manual vehicle detection, and distributed consensus.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+    <!-- ─── TOP BAR ─────────────────────────────────────────────────────── -->
+    <header id="topbar">
+        <div class="topbar-left">
+            <div class="logo">
+                <span class="logo-icon">◈</span>
+                <span class="logo-text">AV<span class="accent">Coord</span></span>
+            </div>
+            <span class="version-badge">v1.0</span>
+        </div>
+        <div class="topbar-center">
+            <div class="status-indicator" id="connectionStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">Connecting…</span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span class="data-badge" id="vehicleCountBadge">— vehicles</span>
+            <span class="data-badge" id="timestampCountBadge">— timesteps</span>
+        </div>
+    </header>
+
+    <!-- ─── MAIN LAYOUT ─────────────────────────────────────────────────── -->
+    <main id="appMain">
+        <!-- LEFT PANEL: Controls + Stats -->
+        <aside id="leftPanel">
+            <!-- Simulation Controls -->
+            <section class="panel-card" id="controlsCard">
+                <div class="card-header">
+                    <h2>Simulation Controls</h2>
+                    <span class="card-icon">⚙</span>
+                </div>
+                <div class="card-body">
+                    <div class="control-group">
+                        <label>Timeline</label>
+                        <div class="slider-container">
+                            <input type="range" id="timelineSlider" min="0" max="100" value="0">
+                            <div class="slider-labels">
+                                <span id="timeLabel">t = —</span>
+                                <span id="frameLabel">Frame —</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Playback</label>
+                        <div class="button-row">
+                            <button id="btnStepBack" class="btn btn-sm" title="Step Back">⏮</button>
+                            <button id="btnPlay" class="btn btn-primary" title="Play/Pause">▶</button>
+                            <button id="btnStepFwd" class="btn btn-sm" title="Step Forward">⏭</button>
+                            <button id="btnReset" class="btn btn-sm" title="Reset">⟲</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Speed</label>
+                        <div class="speed-controls">
+                            <button class="btn btn-xs speed-btn" data-speed="0.25">0.25×</button>
+                            <button class="btn btn-xs speed-btn" data-speed="0.5">0.5×</button>
+                            <button class="btn btn-xs speed-btn active" data-speed="1">1×</button>
+                            <button class="btn btn-xs speed-btn" data-speed="2">2×</button>
+                            <button class="btn btn-xs speed-btn" data-speed="4">4×</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Display</label>
+                        <div class="toggle-group">
+                            <label class="toggle"><input type="checkbox" id="showLinks" checked><span class="toggle-track"></span> Comm Links</label>
+                            <label class="toggle"><input type="checkbox" id="showRadius"><span class="toggle-track"></span> 50m Radius</label>
+                            <label class="toggle"><input type="checkbox" id="showPredictions" checked><span class="toggle-track"></span> Predictions</label>
+                            <label class="toggle"><input type="checkbox" id="showLabels" checked><span class="toggle-track"></span> Vehicle IDs</label>
+                            <label class="toggle"><input type="checkbox" id="showGroups" checked><span class="toggle-track"></span> Traffic Groups</label>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats Card -->
+            <section class="panel-card" id="statsCard">
+                <div class="card-header">
+                    <h2>Live Statistics</h2>
+                    <span class="card-icon">📊</span>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid">
+                        <div class="stat-item">
+                            <span class="stat-value" id="statVehicles">—</span>
+                            <span class="stat-label">Vehicles</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statEdges">—</span>
+                            <span class="stat-label">Comm Links</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statGroups">—</span>
+                            <span class="stat-label">Groups</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statManual">—</span>
+                            <span class="stat-label">Manual</span>
+                        </div>
+                        <div class="stat-item highlight-red">
+                            <span class="stat-value" id="statRisk">—</span>
+                            <span class="stat-label">Max Risk</span>
+                        </div>
+                        <div class="stat-item highlight-green">
+                            <span class="stat-value" id="statADMM">—</span>
+                            <span class="stat-label">ADMM Iter</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Manual Vehicle Detection -->
+            <section class="panel-card" id="manualCard">
+                <div class="card-header">
+                    <h2>Vehicle Classification</h2>
+                    <span class="card-icon">🔍</span>
+                </div>
+                <div class="card-body">
+                    <div class="classification-legend">
+                        <span class="legend-item"><span class="dot dot-green"></span> Autonomous</span>
+                        <span class="legend-item"><span class="dot dot-red"></span> Manual (σ̂ &gt; threshold)</span>
+                        <span class="legend-item"><span class="dot dot-amber"></span> In ADMM Group</span>
+                    </div>
+                    <div class="vehicle-list" id="vehicleList">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </section>
+        </aside>
+
+        <!-- CENTER: Canvas Visualization -->
+        <section id="canvasContainer">
+            <canvas id="simCanvas"></canvas>
+            <div class="canvas-overlay-top">
+                <span class="overlay-badge" id="overlayTimestamp">—</span>
+            </div>
+            <div class="canvas-overlay-bottom" id="canvasLegend">
+                <span class="legend-chip chip-av">🟢 AV</span>
+                <span class="legend-chip chip-manual">🔴 Manual</span>
+                <span class="legend-chip chip-admm">🟡 ADMM</span>
+                <span class="legend-chip chip-link">— Comm Link</span>
+                <span class="legend-chip chip-pred">⋯ Prediction</span>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: ADMM + Costs -->
+        <aside id="rightPanel">
+            <!-- ADMM Panel -->
+            <section class="panel-card" id="admmCard">
+                <div class="card-header">
+                    <h2>ADMM Coordination</h2>
+                    <span class="card-icon">⚡</span>
+                </div>
+                <div class="card-body">
+                    <div class="admm-status" id="admmStatus">
+                        <div class="admm-row">
+                            <span>Status</span>
+                            <span class="admm-value" id="admmConverged">—</span>
+                        </div>
+                        <div class="admm-row">
+                            <span>Iterations</span>
+                            <span class="admm-value" id="admmIterations">—</span>
+                        </div>
+                        <div class="admm-row">
+                            <span>Primal Residual</span>
+                            <span class="admm-value mono" id="admmPrimal">—</span>
+                        </div>
+                        <div class="admm-row">
+                            <span>Dual Residual</span>
+                            <span class="admm-value mono" id="admmDual">—</span>
+                        </div>
+                        <div class="admm-row">
+                            <span>Consensus z</span>
+                            <span class="admm-value mono" id="admmZ">—</span>
+                        </div>
+                        <div class="admm-row">
+                            <span>Affected Vehicles</span>
+                            <span class="admm-value" id="admmAffected">—</span>
+                        </div>
+                    </div>
+                    <div class="convergence-chart-container">
+                        <h3>Convergence</h3>
+                        <canvas id="convergenceChart" height="160"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Cost Breakdown -->
+            <section class="panel-card" id="costCard">
+                <div class="card-header">
+                    <h2>Cost Function</h2>
+                    <span class="card-icon">📈</span>
+                </div>
+                <div class="card-body">
+                    <div class="cost-formula">
+                        f<sub>i</sub> = 0.4 · T<sub>norm</sub> + 0.4 · R<sub>norm</sub> + 0.2 · E<sub>norm</sub>
+                    </div>
+                    <canvas id="costChart" height="300"></canvas>
+                </div>
+            </section>
+
+            <!-- Groups Panel -->
+            <section class="panel-card" id="groupsCard">
+                <div class="card-header">
+                    <h2>Local Traffic Groups</h2>
+                    <span class="card-icon">🔗</span>
+                </div>
+                <div class="card-body">
+                    <div id="groupsList" class="groups-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </section>
+        </aside>
+    </main>
+
+    <script src="app.js?v=2"></script>
+</body>
+</html>
